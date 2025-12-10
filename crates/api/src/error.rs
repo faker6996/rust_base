@@ -62,6 +62,10 @@ impl ApiError {
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", message)
     }
+
+    pub fn unauthorized(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::UNAUTHORIZED, "UNAUTHORIZED", message)
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -88,6 +92,7 @@ impl From<DomainError> for ApiError {
             DomainError::Validation(_) => ApiError::bad_request(err.to_string()),
             DomainError::Conflict(_) => ApiError::conflict(err.to_string()),
             DomainError::Internal(_) => ApiError::internal(err.to_string()),
+            DomainError::Unauthorized(_) => ApiError::unauthorized(err.to_string()),
         }
     }
 }

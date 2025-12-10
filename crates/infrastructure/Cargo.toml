@@ -13,3 +13,5 @@ async-trait = "0.1"
 tracing = "0.1"
 uuid = { version = "1.0", features = ["serde", "v4"] }
 chrono = { version = "0.4", features = ["serde"] }
+argon2 = "0.5"
+jsonwebtoken = "9.0"

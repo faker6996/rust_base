@@ -1,7 +1,11 @@
+pub mod auth;
+
 use async_trait::async_trait;
-use domain::{User, UserRepository, DomainError};
+use domain::{User, UserRepository, DomainError, PaginationParams, Page};
 use sqlx::PgPool;
 use uuid::Uuid;
+
+pub use auth::{ArgonPasswordHasher, JwtTokenService, JwtConfig};
 
 // ============================================================================
 // Repository Implementations (Adapters)
@@ -22,6 +26,7 @@ struct UserRow {
     id: Uuid,
     username: String,
     email: String,
+    password_hash: String,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -31,6 +36,7 @@ impl From<UserRow> for User {
             id: row.id,
             username: row.username,
             email: row.email,
+            password_hash: row.password_hash,
             created_at: row.created_at,
         }
     }
@@ -66,14 +72,15 @@ impl UserRepository for PostgresUserRepository {
     async fn create(&self, user: &User) -> Result<User, DomainError> {
         let row = sqlx::query_as::<_, UserRow>(
             r#"
-            INSERT INTO users (id, username, email, created_at)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, username, email, created_at
+            INSERT INTO users (id, username, email, password_hash, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, username, email, password_hash, created_at
             "#,
         )
         .bind(user.id)
         .bind(&user.username)
         .bind(&user.email)
+        .bind(&user.password_hash)
         .bind(user.created_at)
         .fetch_one(&self.pool)
         .await
@@ -85,7 +92,7 @@ impl UserRepository for PostgresUserRepository {
     async fn find_by_id(&self, id: Uuid) -> Result<Option<User>, DomainError> {
         let row = sqlx::query_as::<_, UserRow>(
             r#"
-            SELECT id, username, email, created_at
+            SELECT id, username, email, password_hash, created_at
             FROM users
             WHERE id = $1
             "#,
@@ -97,4 +104,52 @@ impl UserRepository for PostgresUserRepository {
 
         Ok(row.map(Into::into))
     }
+
+    async fn find_by_email(&self, email: &str) -> Result<Option<User>, DomainError> {
+        let row = sqlx::query_as::<_, UserRow>(
+            r#"
+            SELECT id, username, email, password_hash, created_at
+            FROM users
+            WHERE email = $1
+            "#,
+        )
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| map_sqlx_error(e, "User"))?;
+
+        Ok(row.map(Into::into))
+    }
+
+    async fn list(&self, params: &PaginationParams) -> Result<Page<User>, DomainError> {
+        let rows = sqlx::query_as::<_, UserRow>(
+            r#"
+            SELECT id, username, email, password_hash, created_at
+            FROM users
+            ORDER BY created_at DESC
+            LIMIT $1 OFFSET $2
+            "#,
+        )
+        .bind(params.limit() as i64)
+        .bind(params.offset() as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| map_sqlx_error(e, "User"))?;
+
+        let total = self.count().await?;
+        let users: Vec<User> = rows.into_iter().map(Into::into).collect();
+
+        Ok(Page::new(users, total, params))
+    }
+
+    async fn count(&self) -> Result<u64, DomainError> {
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| map_sqlx_error(e, "User"))?;
+
+        Ok(count.0 as u64)
+    }
 }
+
+
