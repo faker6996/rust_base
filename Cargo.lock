@@ -85,6 +85,7 @@ dependencies = [
  "async-trait",
  "domain",
  "shared",
+ "thiserror",
  "uuid",
 ]
 

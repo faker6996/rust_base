@@ -1,3 +1,5 @@
+mod error;
+
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -11,11 +13,19 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use application::{UserService, UserServiceImpl};
 use infrastructure::PostgresUserRepository;
+use error::ApiError;
 
+// ============================================================================
+// Application State
+// ============================================================================
 
 struct AppState {
     user_service: Arc<dyn UserService>,
 }
+
+// ============================================================================
+// Main Entry Point
+// ============================================================================
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -27,12 +37,6 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // Load config (mocking for now or loading from env)
-    // let config = Config::from_env()?; 
-    // For this template, we'll assume some defaults or env vars are set if we were running it.
-    // But to make it runnable without setup, we will skip actual DB connection if not present?
-    // No, let's try to connect and fail if not present, standard behavior.
-    
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     
     let pool = sqlx::PgPool::connect(&database_url).await?;
@@ -56,9 +60,17 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+// ============================================================================
+// Health Check
+// ============================================================================
+
 async fn health_check() -> &'static str {
     "OK"
 }
+
+// ============================================================================
+// Request/Response DTOs
+// ============================================================================
 
 #[derive(Deserialize)]
 struct CreateUserRequest {
@@ -73,39 +85,42 @@ struct UserResponse {
     email: String,
 }
 
+// ============================================================================
+// Handlers
+// ============================================================================
+
 async fn create_user(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateUserRequest>,
-) -> Result<Json<UserResponse>, (StatusCode, String)> {
+) -> Result<(StatusCode, Json<UserResponse>), ApiError> {
     let user = state
         .user_service
         .create_user(payload.username, payload.email)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        .await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(UserResponse {
+            id: user.id.to_string(),
+            username: user.username,
+            email: user.email,
+        }),
+    ))
+}
+
+async fn get_user(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<UserResponse>, ApiError> {
+    let user = state
+        .user_service
+        .get_user(id)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("User with id {} not found", id)))?;
 
     Ok(Json(UserResponse {
         id: user.id.to_string(),
         username: user.username,
         email: user.email,
     }))
-}
-
-async fn get_user(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<uuid::Uuid>,
-) -> Result<Json<UserResponse>, (StatusCode, String)> {
-    let user = state
-        .user_service
-        .get_user(id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    match user {
-        Some(u) => Ok(Json(UserResponse {
-            id: u.id.to_string(),
-            username: u.username,
-            email: u.email,
-        })),
-        None => Err((StatusCode::NOT_FOUND, "User not found".to_string())),
-    }
 }
