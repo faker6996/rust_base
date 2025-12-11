@@ -6,6 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use utoipa::ToSchema;
 use validator::Validate;
 
 use application::AuthService;
@@ -64,40 +65,68 @@ where
 // Request/Response DTOs with Validation
 // ============================================================================
 
-#[derive(Deserialize, Validate)]
+/// Request body for user registration
+#[derive(Deserialize, Validate, ToSchema)]
 pub struct RegisterRequest {
+    /// Username (3-50 characters)
     #[validate(length(min = 3, max = 50, message = "must be 3-50 characters"))]
+    #[schema(example = "john_doe", min_length = 3, max_length = 50)]
     pub username: String,
+    /// Valid email address
     #[validate(email(message = "must be a valid email"))]
+    #[schema(example = "john@example.com")]
     pub email: String,
+    /// Password (8-128 characters)
     #[validate(length(min = 8, max = 128, message = "must be 8-128 characters"))]
+    #[schema(example = "securepassword123", min_length = 8)]
     pub password: String,
 }
 
-#[derive(Deserialize, Validate)]
+/// Request body for user login
+#[derive(Deserialize, Validate, ToSchema)]
 pub struct LoginRequest {
+    /// Valid email address
     #[validate(email(message = "must be a valid email"))]
+    #[schema(example = "john@example.com")]
     pub email: String,
+    /// User password
     #[validate(length(min = 1, message = "cannot be empty"))]
+    #[schema(example = "securepassword123")]
     pub password: String,
 }
 
-#[derive(Serialize)]
+/// Response after successful registration
+#[derive(Serialize, ToSchema)]
 pub struct AuthResponse {
+    /// Registered user details
     pub user: UserDto,
 }
 
-#[derive(Serialize)]
+/// JWT token response after login
+#[derive(Serialize, ToSchema)]
 pub struct TokenResponse {
+    /// JWT access token
+    #[schema(example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")]
     pub access_token: String,
+    /// Token type (always "Bearer")
+    #[schema(example = "Bearer")]
     pub token_type: String,
+    /// Token expiration time in seconds
+    #[schema(example = 86400)]
     pub expires_in: i64,
 }
 
-#[derive(Serialize)]
+/// User data transfer object
+#[derive(Serialize, ToSchema)]
 pub struct UserDto {
+    /// User UUID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
     pub id: String,
+    /// Username
+    #[schema(example = "john_doe")]
     pub username: String,
+    /// Email address
+    #[schema(example = "john@example.com")]
     pub email: String,
 }
 
@@ -115,7 +144,19 @@ pub fn auth_routes() -> Router<Arc<AppState>> {
 // Handlers
 // ============================================================================
 
-async fn register(
+/// Register a new user
+#[utoipa::path(
+    post,
+    path = "/auth/register",
+    tag = "Authentication",
+    request_body = RegisterRequest,
+    responses(
+        (status = 201, description = "User registered successfully", body = AuthResponse),
+        (status = 400, description = "Validation error"),
+        (status = 409, description = "Email already registered")
+    )
+)]
+pub async fn register(
     State(state): State<Arc<AppState>>,
     ValidatedJson(payload): ValidatedJson<RegisterRequest>,
 ) -> Result<(StatusCode, Json<AuthResponse>), ApiError> {
@@ -136,7 +177,18 @@ async fn register(
     ))
 }
 
-async fn login(
+/// Login and get JWT token
+#[utoipa::path(
+    post,
+    path = "/auth/login",
+    tag = "Authentication",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Login successful", body = TokenResponse),
+        (status = 401, description = "Invalid credentials")
+    )
+)]
+pub async fn login(
     State(state): State<Arc<AppState>>,
     ValidatedJson(payload): ValidatedJson<LoginRequest>,
 ) -> Result<Json<TokenResponse>, ApiError> {
@@ -151,4 +203,5 @@ async fn login(
         expires_in: token.expires_in,
     }))
 }
+
 

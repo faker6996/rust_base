@@ -1,69 +1,122 @@
 # Rust Modern Backend Base
 
-This is a modern Rust backend codebase following **Clean Architecture** principles.
+A production-ready Rust backend with **Clean Architecture**, JWT authentication, and OpenAPI documentation.
 
-## Architecture
+## Features
 
-The project is organized as a Cargo Workspace with the following crates:
+- ✅ Clean Architecture (Domain → Application → Infrastructure → API)
+- ✅ JWT Authentication with Argon2 password hashing
+- ✅ Role-Based Access Control (RBAC)
+- ✅ Input Validation with `validator`
+- ✅ Pagination support
+- ✅ OpenAPI/Swagger documentation
+- ✅ Request ID tracking & CORS
+- ✅ Structured error handling
 
-- **`crates/domain`**: Contains core business entities and repository interfaces (Ports). No external dependencies (mostly).
-- **`crates/application`**: Contains business logic and use cases. Depends on `domain`.
-- **`crates/infrastructure`**: Contains implementation of interfaces (Adapters), e.g., Database repositories using SQLx. Depends on `domain` and `application`.
-- **`crates/api`**: The entry point of the application (Axum server). Wires everything together (Dependency Injection).
-- **`crates/shared`**: Common utilities, configuration, and error types.
-
-## Tech Stack
-
-- **Web Framework**: [Axum](https://github.com/tokio-rs/axum)
-- **Database**: PostgreSQL with [SQLx](https://github.com/launchbadge/sqlx)
-- **Runtime**: [Tokio](https://tokio.rs/)
-- **Configuration**: [config-rs](https://github.com/mehcode/config-rs)
-- **Observability**: [tracing](https://github.com/tokio-rs/tracing)
-
-## Getting Started
+## Quick Start
 
 ### Prerequisites
 
-- Rust (latest stable)
-- PostgreSQL
-- `sqlx-cli` (optional, for migrations)
+- [Rust](https://rustup.rs/) (latest stable)
+- [Docker](https://www.docker.com/) & Docker Compose
+- [sqlx-cli](https://github.com/launchbadge/sqlx) (`cargo install sqlx-cli --features postgres`)
 
-### Setup
-
-1.  **Database Setup**:
-
-    ```bash
-    # Create a database
-    createdb rust_base_db
-
-    # Run migrations
-    export DATABASE_URL=postgres://user:password@localhost/rust_base_db
-    sqlx migrate run
-    ```
-
-2.  **Run the Server**:
-    ```bash
-    export DATABASE_URL=postgres://user:password@localhost/rust_base_db
-    cargo run -p api
-    ```
-
-### Testing
+### 1. Start Database
 
 ```bash
-cargo test
+# Start PostgreSQL & Redis
+docker-compose up -d
 ```
+
+### 2. Setup Environment
+
+```bash
+# Copy env file
+cp .env.example .env
+```
+
+### 3. Run Migrations
+
+```bash
+# Create database and run migrations
+./scripts/init-db.sh
+
+# Or manually:
+sqlx migrate run
+```
+
+### 4. Start Server
+
+```bash
+cargo run -p api
+```
+
+### 5. Open Swagger UI
+
+🌐 http://localhost:3000/swagger-ui/
+
+## API Endpoints
+
+| Method | Endpoint         | Auth | Description            |
+| ------ | ---------------- | ---- | ---------------------- |
+| POST   | `/auth/register` | ❌   | Register new user      |
+| POST   | `/auth/login`    | ❌   | Login and get JWT      |
+| GET    | `/users`         | ❌   | List users (paginated) |
+| GET    | `/users/:id`     | ❌   | Get user by ID         |
+| GET    | `/me`            | ✅   | Get current user       |
+| GET    | `/health`        | ❌   | Health check           |
 
 ## Project Structure
 
 ```
-.
-├── Cargo.toml              # Workspace definition
-├── migrations/             # SQLx migrations
+rust_base/
 ├── crates/
-│   ├── api/                # HTTP layer (Axum)
-│   ├── application/        # Business logic
-│   ├── domain/             # Entities & Interfaces
-│   ├── infrastructure/     # DB & External adapters
-│   └── shared/             # Shared utils
-└── README.md
+│   ├── api/            # HTTP layer (Axum, handlers, middleware)
+│   ├── application/    # Business logic & use cases
+│   ├── domain/         # Entities, errors, repository traits
+│   ├── infrastructure/ # DB repositories, auth implementations
+│   └── shared/         # Configuration
+├── migrations/         # SQL migrations
+├── scripts/            # Helper scripts
+├── docker-compose.yml  # PostgreSQL & Redis
+└── .env.example        # Environment template
 ```
+
+## Environment Variables
+
+| Variable               | Default                  | Description                  |
+| ---------------------- | ------------------------ | ---------------------------- |
+| `DATABASE_URL`         | -                        | PostgreSQL connection string |
+| `REDIS_URL`            | `redis://localhost:6379` | Redis connection string      |
+| `JWT_SECRET`           | `super-secret-key...`    | JWT signing secret           |
+| `JWT_EXPIRATION_HOURS` | `24`                     | Token expiration time        |
+| `RUST_LOG`             | `info`                   | Log level                    |
+
+## Tech Stack
+
+- **Web Framework**: [Axum](https://github.com/tokio-rs/axum)
+- **Database**: PostgreSQL + [SQLx](https://github.com/launchbadge/sqlx)
+- **Cache**: Redis (ready for integration)
+- **Auth**: JWT + Argon2
+- **Docs**: [utoipa](https://github.com/juhaku/utoipa) (Swagger UI)
+- **Runtime**: [Tokio](https://tokio.rs/)
+
+## Development
+
+```bash
+# Run tests
+cargo test
+
+# Format code
+cargo fmt
+
+# Lint
+cargo clippy
+
+# Build release
+cargo build --release
+```
+
+## License
+
+MIT

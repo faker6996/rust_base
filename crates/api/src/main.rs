@@ -17,12 +17,56 @@ use tower_http::{
     trace::TraceLayer,
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use utoipa::{OpenApi, ToSchema};
+use utoipa_swagger_ui::SwaggerUi;
 
 use application::{AuthService, AuthServiceImpl, TokenService, UserService, UserServiceImpl};
 use domain::PaginationParams;
 use infrastructure::{ArgonPasswordHasher, JwtConfig, JwtTokenService, PostgresUserRepository};
 use error::ApiError;
 use middleware::{AuthUser, RequestId};
+
+// Re-export auth types for OpenAPI
+use auth::{RegisterRequest, LoginRequest, AuthResponse, TokenResponse, UserDto};
+
+// ============================================================================
+// OpenAPI Documentation
+// ============================================================================
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "Rust Base API",
+        version = "1.0.0",
+        description = "A production-ready Rust backend API with Clean Architecture",
+        contact(name = "API Support", email = "support@example.com"),
+        license(name = "MIT")
+    ),
+    paths(
+        auth::register,
+        auth::login,
+        list_users,
+        get_user,
+        get_current_user,
+        health_check,
+    ),
+    components(schemas(
+        RegisterRequest,
+        LoginRequest,
+        AuthResponse,
+        TokenResponse,
+        UserDto,
+        UserResponse,
+        PaginatedUserResponse,
+        HealthResponse,
+    )),
+    tags(
+        (name = "Authentication", description = "User registration and login"),
+        (name = "Users", description = "User management endpoints"),
+        (name = "Health", description = "Health check endpoints")
+    )
+)]
+struct ApiDoc;
 
 // ============================================================================
 // Application State
@@ -40,6 +84,9 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load .env file
+    dotenvy::dotenv().ok();
+
     // Initialize tracing
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
@@ -93,6 +140,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Combine all routes with global middlewares
     let app = Router::new()
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .merge(public_routes)
         .merge(protected_routes)
         .layer(TraceLayer::new_for_http())
@@ -103,12 +151,8 @@ async fn main() -> anyhow::Result<()> {
     let addr = "0.0.0.0:3000";
     let listener = TcpListener::bind(addr).await?;
     tracing::info!("🚀 Server listening on {}", addr);
-    tracing::info!("📖 Endpoints:");
-    tracing::info!("   POST /auth/register - Register new user");
-    tracing::info!("   POST /auth/login    - Login and get JWT");
-    tracing::info!("   GET  /users         - List users (paginated)");
-    tracing::info!("   GET  /users/:id     - Get user by ID");
-    tracing::info!("   GET  /me            - Get current user (protected)");
+    tracing::info!("📖 Swagger UI: http://{}/swagger-ui/", addr);
+    tracing::info!("📄 OpenAPI JSON: http://{}/api-docs/openapi.json", addr);
     axum::serve(listener, app).await?;
 
     Ok(())
@@ -118,31 +162,67 @@ async fn main() -> anyhow::Result<()> {
 // Health Check
 // ============================================================================
 
-async fn health_check(request_id: RequestId) -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "status": "ok",
-        "request_id": request_id.0
-    }))
+/// Health check response
+#[derive(Serialize, ToSchema)]
+struct HealthResponse {
+    /// API status
+    #[schema(example = "ok")]
+    status: String,
+    /// Request tracking ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    request_id: String,
+}
+
+/// Check API health status
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "Health",
+    responses(
+        (status = 200, description = "API is healthy", body = HealthResponse)
+    )
+)]
+async fn health_check(request_id: RequestId) -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok".to_string(),
+        request_id: request_id.0,
+    })
 }
 
 // ============================================================================
 // Request/Response DTOs
 // ============================================================================
 
-#[derive(Serialize)]
+/// User response object
+#[derive(Serialize, ToSchema)]
 struct UserResponse {
+    /// User UUID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
     id: String,
+    /// Username
+    #[schema(example = "john_doe")]
     username: String,
+    /// Email address
+    #[schema(example = "john@example.com")]
     email: String,
 }
 
-/// Paginated response wrapper for API responses
-#[derive(Serialize)]
-struct PaginatedResponse<T> {
-    items: Vec<T>,
+/// Paginated response wrapper for users
+#[derive(Serialize, ToSchema)]
+struct PaginatedUserResponse {
+    /// List of users
+    items: Vec<UserResponse>,
+    /// Total number of users
+    #[schema(example = 100)]
     total: u64,
+    /// Current page number
+    #[schema(example = 1)]
     page: u32,
+    /// Items per page
+    #[schema(example = 20)]
     per_page: u32,
+    /// Total number of pages
+    #[schema(example = 5)]
     total_pages: u32,
 }
 
@@ -150,11 +230,23 @@ struct PaginatedResponse<T> {
 // Public Handlers
 // ============================================================================
 
-/// List users with pagination
+/// List all users with pagination
+#[utoipa::path(
+    get,
+    path = "/users",
+    tag = "Users",
+    params(
+        ("page" = Option<u32>, Query, description = "Page number (default: 1)"),
+        ("per_page" = Option<u32>, Query, description = "Items per page (default: 20, max: 100)")
+    ),
+    responses(
+        (status = 200, description = "List of users", body = PaginatedUserResponse)
+    )
+)]
 async fn list_users(
     State(state): State<Arc<AppState>>,
     Query(params): Query<PaginationParams>,
-) -> Result<Json<PaginatedResponse<UserResponse>>, ApiError> {
+) -> Result<Json<PaginatedUserResponse>, ApiError> {
     let page = state
         .user_service
         .list_users(&params)
@@ -170,7 +262,7 @@ async fn list_users(
         })
         .collect();
 
-    Ok(Json(PaginatedResponse {
+    Ok(Json(PaginatedUserResponse {
         items,
         total: page.total,
         page: page.page,
@@ -179,6 +271,19 @@ async fn list_users(
     }))
 }
 
+/// Get a user by ID
+#[utoipa::path(
+    get,
+    path = "/users/{id}",
+    tag = "Users",
+    params(
+        ("id" = String, Path, description = "User UUID")
+    ),
+    responses(
+        (status = 200, description = "User found", body = UserResponse),
+        (status = 404, description = "User not found")
+    )
+)]
 async fn get_user(
     State(state): State<Arc<AppState>>,
     Path(id): Path<uuid::Uuid>,
@@ -200,7 +305,17 @@ async fn get_user(
 // Protected Handlers
 // ============================================================================
 
-/// Handler that requires authentication - demonstrates AuthUser extractor
+/// Get current authenticated user
+#[utoipa::path(
+    get,
+    path = "/me",
+    tag = "Users",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "Current user info", body = UserResponse),
+        (status = 401, description = "Unauthorized")
+    )
+)]
 async fn get_current_user(
     State(state): State<Arc<AppState>>,
     AuthUser(claims): AuthUser,
@@ -220,5 +335,6 @@ async fn get_current_user(
         email: user.email,
     }))
 }
+
 
 
