@@ -80,7 +80,7 @@ impl UserService for UserServiceImpl {
     }
 
     async fn list_users(&self, params: &PaginationParams) -> Result<Page<User>, ApplicationError> {
-        Ok(self.repository.list(params).await?)
+        Ok(self.repository.find_all(params).await?)
     }
 }
 

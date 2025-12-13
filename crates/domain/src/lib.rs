@@ -196,13 +196,58 @@ impl<T> Page<T> {
 // Repository Traits (Ports)
 // ============================================================================
 
-#[async_trait]
-pub trait UserRepository: Send + Sync {
-    async fn create(&self, user: &User) -> Result<User, DomainError>;
-    async fn find_by_id(&self, id: Uuid) -> Result<Option<User>, DomainError>;
-    async fn find_by_email(&self, email: &str) -> Result<Option<User>, DomainError>;
-    async fn list(&self, params: &PaginationParams) -> Result<Page<User>, DomainError>;
-    async fn count(&self) -> Result<u64, DomainError>;
+/// Marker trait for entities with an ID
+pub trait Entity: Clone + Send + Sync {
+    type Id: Clone + Send + Sync + 'static;
+    
+    fn id(&self) -> Self::Id;
 }
+
+impl Entity for User {
+    type Id = Uuid;
+    
+    fn id(&self) -> Self::Id {
+        self.id
+    }
+}
+
+/// Generic repository trait with common CRUD operations
+/// Similar to C# base repository pattern with Dapper
+#[async_trait]
+pub trait Repository<T: Entity>: Send + Sync {
+    /// Find entity by ID
+    async fn find_by_id(&self, id: T::Id) -> Result<Option<T>, DomainError>;
+    
+    /// Get all entities with pagination
+    async fn find_all(&self, params: &PaginationParams) -> Result<Page<T>, DomainError>;
+    
+    /// Create a new entity
+    async fn create(&self, entity: &T) -> Result<T, DomainError>;
+    
+    /// Update an existing entity
+    async fn update(&self, entity: &T) -> Result<T, DomainError>;
+    
+    /// Delete entity by ID
+    async fn delete(&self, id: T::Id) -> Result<bool, DomainError>;
+    
+    /// Count total entities
+    async fn count(&self) -> Result<u64, DomainError>;
+    
+    /// Check if entity exists by ID
+    async fn exists(&self, id: T::Id) -> Result<bool, DomainError> {
+        Ok(self.find_by_id(id).await?.is_some())
+    }
+}
+
+/// User-specific repository with additional methods
+#[async_trait]
+pub trait UserRepository: Repository<User> {
+    /// Find user by email (for authentication)
+    async fn find_by_email(&self, email: &str) -> Result<Option<User>, DomainError>;
+    
+    /// Find user by username
+    async fn find_by_username(&self, username: &str) -> Result<Option<User>, DomainError>;
+}
+
 
 

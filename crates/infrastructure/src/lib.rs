@@ -1,7 +1,7 @@
 pub mod auth;
 
 use async_trait::async_trait;
-use domain::{User, UserRepository, DomainError, PaginationParams, Page};
+use domain::{User, UserRepository, Repository, DomainError, PaginationParams, Page};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -67,28 +67,12 @@ fn map_sqlx_error(err: sqlx::Error, entity: &'static str) -> DomainError {
     }
 }
 
+// ============================================================================
+// Generic Repository Implementation for User
+// ============================================================================
+
 #[async_trait]
-impl UserRepository for PostgresUserRepository {
-    async fn create(&self, user: &User) -> Result<User, DomainError> {
-        let row = sqlx::query_as::<_, UserRow>(
-            r#"
-            INSERT INTO users (id, username, email, password_hash, created_at)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, username, email, password_hash, created_at
-            "#,
-        )
-        .bind(user.id)
-        .bind(&user.username)
-        .bind(&user.email)
-        .bind(&user.password_hash)
-        .bind(user.created_at)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| map_sqlx_error(e, "User"))?;
-
-        Ok(row.into())
-    }
-
+impl Repository<User> for PostgresUserRepository {
     async fn find_by_id(&self, id: Uuid) -> Result<Option<User>, DomainError> {
         let row = sqlx::query_as::<_, UserRow>(
             r#"
@@ -105,23 +89,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(row.map(Into::into))
     }
 
-    async fn find_by_email(&self, email: &str) -> Result<Option<User>, DomainError> {
-        let row = sqlx::query_as::<_, UserRow>(
-            r#"
-            SELECT id, username, email, password_hash, created_at
-            FROM users
-            WHERE email = $1
-            "#,
-        )
-        .bind(email)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| map_sqlx_error(e, "User"))?;
-
-        Ok(row.map(Into::into))
-    }
-
-    async fn list(&self, params: &PaginationParams) -> Result<Page<User>, DomainError> {
+    async fn find_all(&self, params: &PaginationParams) -> Result<Page<User>, DomainError> {
         let rows = sqlx::query_as::<_, UserRow>(
             r#"
             SELECT id, username, email, password_hash, created_at
@@ -142,6 +110,57 @@ impl UserRepository for PostgresUserRepository {
         Ok(Page::new(users, total, params))
     }
 
+    async fn create(&self, user: &User) -> Result<User, DomainError> {
+        let row = sqlx::query_as::<_, UserRow>(
+            r#"
+            INSERT INTO users (id, username, email, password_hash, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, username, email, password_hash, created_at
+            "#,
+        )
+        .bind(user.id)
+        .bind(&user.username)
+        .bind(&user.email)
+        .bind(&user.password_hash)
+        .bind(user.created_at)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| map_sqlx_error(e, "User"))?;
+
+        Ok(row.into())
+    }
+
+    async fn update(&self, user: &User) -> Result<User, DomainError> {
+        let row = sqlx::query_as::<_, UserRow>(
+            r#"
+            UPDATE users
+            SET username = $2, email = $3, password_hash = $4
+            WHERE id = $1
+            RETURNING id, username, email, password_hash, created_at
+            "#,
+        )
+        .bind(user.id)
+        .bind(&user.username)
+        .bind(&user.email)
+        .bind(&user.password_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| map_sqlx_error(e, "User"))?
+        .ok_or_else(|| DomainError::not_found("User", user.id.to_string()))?;
+
+        Ok(row.into())
+    }
+
+    async fn delete(&self, id: Uuid) -> Result<bool, DomainError> {
+        let result = sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| map_sqlx_error(e, "User"))?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn count(&self) -> Result<u64, DomainError> {
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
             .fetch_one(&self.pool)
@@ -151,5 +170,45 @@ impl UserRepository for PostgresUserRepository {
         Ok(count.0 as u64)
     }
 }
+
+// ============================================================================
+// User-Specific Repository Methods
+// ============================================================================
+
+#[async_trait]
+impl UserRepository for PostgresUserRepository {
+    async fn find_by_email(&self, email: &str) -> Result<Option<User>, DomainError> {
+        let row = sqlx::query_as::<_, UserRow>(
+            r#"
+            SELECT id, username, email, password_hash, created_at
+            FROM users
+            WHERE email = $1
+            "#,
+        )
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| map_sqlx_error(e, "User"))?;
+
+        Ok(row.map(Into::into))
+    }
+
+    async fn find_by_username(&self, username: &str) -> Result<Option<User>, DomainError> {
+        let row = sqlx::query_as::<_, UserRow>(
+            r#"
+            SELECT id, username, email, password_hash, created_at
+            FROM users
+            WHERE username = $1
+            "#,
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| map_sqlx_error(e, "User"))?;
+
+        Ok(row.map(Into::into))
+    }
+}
+
 
 
